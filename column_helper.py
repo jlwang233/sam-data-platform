@@ -75,6 +75,23 @@ class ColumnDataTypeCheck:
 
         return result
 
+    def to_spark_dtype(dtype: str) -> str:
+        check = dtype.lower()
+        if check == "bigint":
+            return "long"
+        if check == "int":
+            return "int"
+        if check == "real":
+            return "double"
+        if check == "boolean":
+            return "boolean"
+        if check == "date":
+            return "date"
+        if check.startswith("timestamp"):
+            return "timestamp"
+
+        return "string"
+
     def is_float(self, item: str) -> bool:
         try:
             float(item)

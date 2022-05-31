@@ -4,8 +4,10 @@ import time
 
 
 class Redshift:
-    def __init__(self, region_name: str, secret_arn: str, redshift_secret_name: str, db_name: str, s3_temp: str):
+    def __init__(self, region_name: str, secret_arn: str, redshift_secret_name: str, db_name: str, end_point: str, s3_temp: str):
         redshift_info = get_secret(redshift_secret_name, region_name)
+
+        print("===============> got redshift_info")
         self.redshift_identifier = redshift_info['dbClusterIdentifier']
         self.redshift_jdbc = f"jdbc:redshift://{redshift_info['host']}:{redshift_info['port']}/dev"
         self.redshift_user = redshift_info['username']
@@ -13,8 +15,12 @@ class Redshift:
         self.redshift_db = db_name
         self.secret_arn = secret_arn
         self.client = boto3.client(
-            'redshift-data', region_name="cn-northwest-1")
+            'redshift-data',
+            region_name=region_name,
+            endpoint_url=end_point,
+        )
         self.s3_temp = s3_temp
+        self.tables()
 
     def query(self, sql: str, timeout=15) -> list:
         response = self.client.execute_statement(
@@ -153,11 +159,25 @@ class Redshift:
         sql_list.append(");")
         return "\n".join(sql_list)
 
-    def redshift_conn(self, tb_name: str):
-        return {
+    def tables(self):
+        response = self.client.list_tables(
+            ClusterIdentifier=self.redshift_identifier,
+            ConnectedDatabase=self.redshift_db,
+            Database=self.redshift_db,
+            MaxResults=123,
+            SecretArn=self.secret_arn
+
+        )
+        print(response)
+
+    def conn_option(self, tb_name: str, write_mode='append'):
+        conn = {
             "url": self.redshift_jdbc,
             "dbtable": tb_name,
             "user": self.redshift_user,
             "password": self.redshift_pass,
             "redshiftTmpDir": f"{self.s3_temp}/temp/{tb_name}/"
         }
+        if write_mode == "overwrite":
+            conn["preactions"] = f"TRUNCATE TABLE {tb_name}"
+        return conn
