@@ -1,14 +1,6 @@
-from asyncio import tasks
-import sys
-import time
 
+import time
 from datetime import datetime
-from pyspark.context import SparkContext
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
-from pyspark.sql.types import StringType, ArrayType, StructType, StructField, DateType
-from redshift import Redshift
-from column_helper import ColumnDataTypeCheck, ColumnFormater
 import boto3
 import json
 
