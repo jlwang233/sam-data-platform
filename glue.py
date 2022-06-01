@@ -1,5 +1,5 @@
 import sys
-from time import time
+import time
 from awsglue.transforms import *
 from awsglue.dynamicframe import DynamicFrame
 from awsglue.utils import getResolvedOptions
@@ -13,6 +13,9 @@ from pyspark.sql.types import StringType, ArrayType, StructType, StructField, Da
 from redshift import Redshift
 from column_helper import ColumnDataTypeCheck, ColumnFormater
 import boto3
+import json
+
+
 # TODO 修改成您的 secret_name， region_name
 
 region_name = "cn-northwest-1"
@@ -23,6 +26,7 @@ redshift_db = 'dev'
 redshift_temp_s3 = 's3://txt-glue-code'
 redshift_endpoint = "https://vpce-0c20d267bb10f74e6-zlv5xrlp.redshift-data.cn-northwest-1.vpce.amazonaws.com.cn"
 dynamodb_sam_data_trace_tb = 'sam-data-upload-event'
+sqs_url = "https://sqs.cn-northwest-1.amazonaws.com.cn/027040934161/sam-data-plaftform-test"
 
 args = getResolvedOptions(sys.argv, ['JOB_NAME'])
 
@@ -129,36 +133,70 @@ def get_tb_name(s3_path: str):
 
 
 def get_tasks():
+    sqs = boto3.client('sqs', region_name=region_name)
     dynamodb = boto3.client('dynamodb', region_name=region_name)
 
-    t = dynamodb.scan(
-        TableName=dynamodb_sam_data_trace_tb,
-        Select='ALL_ATTRIBUTES',
-        ScanFilter={
-            'status': {
-                'AttributeValueList': [
-                    {
-                        'S': 'begin'
-                    }
-                ],
-                'ComparisonOperator': 'EQ'
-            }
-        }
-    )
+    index = 0
+    while True:
+        response = sqs.receive_message(
+            QueueUrl=sqs_url,
+            VisibilityTimeout=300
+        )
+        if "Messages" not in response:
+            print(f"===> got {index}")
+            break
 
-    todo = []
-    if 'Items' in t:
-        items = t['Items']
-        for item in items:
-            event_time = item["event_time"]["S"]
-            file_key = item["file_key"]["S"]
-            status = item["status"]["S"]
-            todo.append({
-                "event_time": event_time,
-                "file_key": file_key,
-                "status": status
-            })
-    return todo
+        index += 1
+        messages = response["Messages"]
+        for msg in messages:
+            body_str = msg["Body"]
+            body = json.loads(body_str)
+            receipt_handle = msg["ReceiptHandle"]
+
+            #  "file_key": file_key,
+            #  "event_time": current_time,
+            #  "status": "begin"
+
+            # 修改状态为正在开始处理
+            dynamodb.update_item(
+                TableName=dynamodb_sam_data_trace_tb,
+                Key={
+                    'file_key': {'S': body['file_key']},
+                    'event_time':  {'S': body['event_time']}
+
+                },
+                AttributeUpdates={
+                    'status': {
+                        'Value':  {
+                            "S": "processing"
+                        }
+                    }
+                }
+            )
+
+            yield body
+
+            sqs.delete_message(
+                QueueUrl=sqs_url,
+                ReceiptHandle=receipt_handle
+            )
+
+            # 修改状态为正在完成
+            dynamodb.update_item(
+                TableName=dynamodb_sam_data_trace_tb,
+                Key={
+                    'file_key': {'S': body['file_key']},
+                    'event_time':  {'S': body['event_time']}
+
+                },
+                AttributeUpdates={
+                    'status': {
+                        'Value':  {
+                            "S": "finished"
+                        }
+                    }
+                }
+            )
 
 
 def get_data(spark: SparkSession, s3_path: str) -> DataFrame:
@@ -208,7 +246,7 @@ def write_data(redshift: Redshift, target_tb: str, history_tb_name: str, df_data
     )
 
 
-def main():
+def do_task(file_s3_path: str):
     # 表明从dynamodb 去获取
     target_tb, version = get_tb_name(file_s3_path)
 
@@ -254,12 +292,18 @@ def main():
 
     # 如果是第一次写入数据后，则需要添加注释信息
     if not schema:
-        time.sleep(2)
+        time.sleep(1)
         comments = get_column_chinese(df_header)
         redshift.comments(target_tb, comments)
         redshift.comments(history_tb_name, comments)
 
 
-main()
+def main():
+    for task in get_tasks():
+        file_path = task['file_key']
+        do_task(file_path)
 
-job.commit()
+    job.commit()
+
+
+main()
