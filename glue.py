@@ -16,17 +16,18 @@ import boto3
 import json
 
 
-# TODO 修改成您的 secret_name， region_name
-
 region_name = "cn-northwest-1"
 
+# ===========================需要修改的配置参数================================
 redshift_secret_name = 'dev/demo/redshift'
 secret_arn = 'arn:aws-cn:secretsmanager:cn-northwest-1:027040934161:secret:dev/demo/redshift-dpZ9yS'
 redshift_db = 'dev'
-redshift_temp_s3 = 's3://txt-glue-code'
+redshift_temp_s3 = 's3://sam-data-platform-redshift-temp'
 redshift_endpoint = "https://vpce-0c20d267bb10f74e6-zlv5xrlp.redshift-data.cn-northwest-1.vpce.amazonaws.com.cn"
 dynamodb_sam_data_trace_tb = 'sam-data-upload-event'
 sqs_url = "https://sqs.cn-northwest-1.amazonaws.com.cn/027040934161/sam-data-plaftform-test"
+sqs_endpoint_url = "https://vpce-05ddb236d804f224d-s18hyk87.sqs.cn-northwest-1.vpce.amazonaws.com.cn"
+# =============================上面参数需要修改==========================================
 
 args = getResolvedOptions(sys.argv, ['JOB_NAME'])
 
@@ -55,22 +56,9 @@ def split_df_header(session: SparkSession, df: DataFrame):
 
     df_scheme = StructType(field_schema)
 
-    df_header = session.createDataFrame(header)
+    df_header = session.createDataFrame(header, df_scheme)
     df_data = session.createDataFrame(data, df_scheme)
     return df_header, df_data
-
-
-def create_table(redshift: Redshift, tb_name: str, df_header: DataFrame, column_with_dtype: dict):
-    btsql = redshift.create(tb_name, df_header.columns, column_with_dtype)
-
-    ok = redshift.exec(btsql)
-    if not ok:
-        print("create table on redshift failed")
-        return
-
-    # 添加注释
-    comments = get_column_chinese(df_header)
-    redshift.comments(tb_name, comments)
 
 
 def add_new_columns_to_schema(redshift: Redshift, tb_name: str, df_data: DataFrame, redshift_schema: dict):
@@ -83,6 +71,7 @@ def add_new_columns_to_schema(redshift: Redshift, tb_name: str, df_data: DataFra
     new_columns = [c for c in data_columns if c not in redshift_schema]
 
     if len(new_columns) > 0:
+        print(f"=========> got new columns {new_columns}")
         column_checker = ColumnDataTypeCheck()
         # 要通过采样，获取新增列的数据类型
         column_with_dtype = column_checker.run(df_data, new_columns)
@@ -133,7 +122,8 @@ def get_tb_name(s3_path: str):
 
 
 def get_tasks():
-    sqs = boto3.client('sqs', region_name=region_name)
+    sqs = boto3.client('sqs', region_name=region_name,
+                       endpoint_url=sqs_endpoint_url)
     dynamodb = boto3.client('dynamodb', region_name=region_name)
 
     index = 0
@@ -142,6 +132,7 @@ def get_tasks():
             QueueUrl=sqs_url,
             VisibilityTimeout=300
         )
+        print(response)
         if "Messages" not in response:
             print(f"===> got {index}")
             break
@@ -158,7 +149,7 @@ def get_tasks():
             #  "status": "begin"
 
             # 修改状态为正在开始处理
-            dynamodb.update_item(
+            dp = dynamodb.update_item(
                 TableName=dynamodb_sam_data_trace_tb,
                 Key={
                     'file_key': {'S': body['file_key']},
@@ -173,6 +164,7 @@ def get_tasks():
                     }
                 }
             )
+            print(dp)
 
             yield body
 
@@ -226,7 +218,7 @@ def write_data(redshift: Redshift, target_tb: str, history_tb_name: str, df_data
         df_data_history, glueContext, "nested")
 
     # write to history table
-    print("begin to write history table")
+    print(f"begin to write history table {history_tb_name}")
     append_options = redshift.conn_option(history_tb_name)
     glueContext.write_dynamic_frame.from_options(
         frame=dyn_df_data_history,
@@ -235,7 +227,7 @@ def write_data(redshift: Redshift, target_tb: str, history_tb_name: str, df_data
     )
 
     # write to current table
-    print("begin to write stable table")
+    print(f"begin to write stable table {target_tb}")
     dyn_df_data = DynamicFrame.fromDF(df_data, glueContext, "nested")
     overwrite_options = redshift.conn_option(target_tb, "overwrite")
 
@@ -266,14 +258,18 @@ def do_task(file_s3_path: str):
     schema = redshift.schema(target_tb)
     print("===============> check schema")
     df_data.printSchema()
+
     # 默认情况，由于有大量缺失值，数据类型都是string
     if not schema:
         # 如果没有在 db 创建过该表，则需要根据数据采样，来修正数据的类型信息
         column_checker = ColumnDataTypeCheck()
         column_with_dtype = column_checker.run(df_data)
         df_data = update_column_dtype(column_with_dtype, df_data)
+        print("===============> update schema from sampling")
 
     else:
+        print("=============> schema exist in redshift")
+        print(schema)
         # 如果db 中已经存在该表，则根据数据库中的表schema，更新数据的schema
         df_data = update_column_dtype(schema, df_data)
         # 有新增列，则修改redshift 表结构，添加新列,并根据采样修正数据中新增列的数据类型
@@ -282,6 +278,7 @@ def do_task(file_s3_path: str):
 
         # 有删除列，则要在数据中添加删除的列，值设置为空
         df_data = fill_lost_columns(schema, df_data)
+        print("===============> update schema from redshift")
 
     df_data.printSchema()
 
@@ -301,6 +298,7 @@ def do_task(file_s3_path: str):
 def main():
     for task in get_tasks():
         file_path = task['file_key']
+        print(f"=========> got task {file_path}")
         do_task(file_path)
 
     job.commit()

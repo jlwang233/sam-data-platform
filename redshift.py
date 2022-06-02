@@ -20,7 +20,6 @@ class Redshift:
             endpoint_url=end_point,
         )
         self.s3_temp = s3_temp
-        self.tables()
 
     def query(self, sql: str, timeout=15) -> list:
         response = self.client.execute_statement(

@@ -5,10 +5,13 @@ import boto3
 from datetime import datetime
 
 region_name = "cn-northwest-1"
-dynamodb_sam_data_trace_tb = 'sam-data-upload-event'
-sqs_url = "https://sqs.cn-northwest-1.amazonaws.com.cn/027040934161/sam-data-plaftform-test"
-workflow_name = "xiaoshouyi"
 max_parallel_count = 10
+
+# ===========================需要修改或确认的配置参数================================
+dynamodb_sam_data_trace_tb = 'sam-data-upload-event'
+workflow_name = "sam-data-workflow"
+sqs_url = "https://sqs.cn-northwest-1.amazonaws.com.cn/027040934161/sam-data-plaftform-test"
+# ===========================需要修改或确认的配置参数================================
 
 
 def lambda_handler(event, context):
@@ -25,7 +28,8 @@ def lambda_handler(event, context):
         dynamodb = boto3.client('dynamodb', region_name=region_name)
         sqs = boto3.client('sqs', region_name=region_name)
         for key in keys:
-            file_key = "s3://" + key
+            ukey = urllib.parse.unquote_plus(key, encoding='utf-8')
+            file_key = "s3://" + ukey
             dynamodb.update_item(
                 TableName=dynamodb_sam_data_trace_tb,
                 Key={
