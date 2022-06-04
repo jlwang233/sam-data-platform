@@ -114,7 +114,7 @@ def get_tb_name(s3_path: str):
     parts = file_name.split("_")
     uparts = parts[0: len(parts) - 1]
     tb_name = "_".join(uparts).lower()
-
+    tb_name = tb_name.replace(' ', '_')
     version_cvs = parts[len(parts) - 1]
     # len(".csv") == 4
     version = version_cvs[0:len(version_cvs) - 4]
@@ -130,7 +130,7 @@ def get_tasks():
     while True:
         response = sqs.receive_message(
             QueueUrl=sqs_url,
-            VisibilityTimeout=300
+            VisibilityTimeout=60
         )
         print(response)
         if "Messages" not in response:
@@ -143,6 +143,10 @@ def get_tasks():
             body_str = msg["Body"]
             body = json.loads(body_str)
             receipt_handle = msg["ReceiptHandle"]
+            sqs.delete_message(
+                QueueUrl=sqs_url,
+                ReceiptHandle=receipt_handle
+            )
 
             #  "file_key": file_key,
             #  "event_time": current_time,
@@ -166,14 +170,10 @@ def get_tasks():
             )
             print(dp)
 
-            yield body
+            task_status = yield body
 
-            sqs.delete_message(
-                QueueUrl=sqs_url,
-                ReceiptHandle=receipt_handle
-            )
-
-            # 修改状态为正在完成
+            status = 'failed' if task_status else 'successful'
+            # 修改状态为正在完成或失败
             dynamodb.update_item(
                 TableName=dynamodb_sam_data_trace_tb,
                 Key={
@@ -184,7 +184,7 @@ def get_tasks():
                 AttributeUpdates={
                     'status': {
                         'Value':  {
-                            "S": "finished"
+                            "S": status
                         }
                     }
                 }
@@ -201,9 +201,7 @@ def get_data(spark: SparkSession, s3_path: str) -> DataFrame:
         "encoding", 'GBK'
     ).csv(s3_path)
     df_raw = df_raw.drop("English")
-    for column in df_raw.columns:
-        if len(column.strip()) == 0:
-            df_raw = df_raw.drop(column)
+
     return df_raw
 
 
@@ -245,11 +243,12 @@ def do_task(file_s3_path: str):
     df_raw = get_data(spark, file_s3_path)
     df_raw.printSchema()
 
-    df_raw = df_raw.drop("English")
-    df_header, df_data = split_df_header(spark, df_raw)
-
     print("===============> begin format")
     formater = ColumnFormater()
+    df_raw = formater.remove_unused_columns(df_raw)
+
+    df_header, df_data = split_df_header(spark, df_raw)
+
     df_header = formater.run(df_header)
     df_data = formater.run(df_data)
     print("===============> end format")
@@ -296,10 +295,15 @@ def do_task(file_s3_path: str):
 
 
 def main():
-    for task in get_tasks():
+    gen = get_tasks()
+    for task in gen:
         file_path = task['file_key']
         print(f"=========> got task {file_path}")
-        do_task(file_path)
+        try:
+            do_task(file_path)
+        except Exception as e:
+            print(f"ERROR ===========> {e}")
+            gen.send(False)
 
     job.commit()
 

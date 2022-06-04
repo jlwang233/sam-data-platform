@@ -81,7 +81,7 @@ class ColumnDataTypeCheck:
             return "long"
         if check == "int":
             return "int"
-        if check == "real":
+        if check == "real" or check.startswith("double"):
             return "double"
         if check == "boolean":
             return "boolean"
@@ -141,6 +141,18 @@ class ColumnFormater:
         df = self.update_duplicate_columns(df)
         return df
 
+    def remove_unused_columns(self, df: DataFrame) -> DataFrame:
+        df = df.drop("English")
+
+        for column in df.columns:
+            if len(column.strip()) == 0:
+                df = df.drop(column)
+                continue
+            if column.startswith('_c') and column[2:].isnumeric():
+                df = df.drop(column)
+                continue
+        return df
+
     def update_duplicate_columns(self, df: DataFrame) -> DataFrame:
         duplicate_columns = dict()
         # 查找重复列
@@ -197,6 +209,9 @@ class ColumnFormater:
             if first_char.isnumeric():
                 new_name = "AT_" + new_name
 
+            # 全小写
+            new_name = new_name.lower()
             if column_name != new_name:
                 df = df.withColumnRenamed(column_name, new_name)
+
         return df

@@ -118,6 +118,10 @@ def get_tb_name(s3_path: str):
     return tb_name, version
 
 
+def get_tasks():
+    pass
+
+
 def get_data(spark: SparkSession, s3_path: str) -> DataFrame:
 
     df_raw = spark.read.option(
@@ -132,38 +136,6 @@ def get_data(spark: SparkSession, s3_path: str) -> DataFrame:
         if len(column.strip()) == 0:
             df_raw = df_raw.drop(column)
     return df_raw
-
-
-def write_data(redshift: Redshift, target_tb: str, history_tb_name: str, df_data: DataFrame, data_version: str):
-    # current_date = datetime.now().strftime("%Y-%m-%d")
-    # # 保存所有历史的数据，历史表添加一个数据etl 日期
-    # df_data_history = df_data.withColumn("etl_date", F.lit(current_date))
-    # df_data_history = df_data_history.withColumn(
-    #     "etl_version",  F.lit(data_version))
-
-    # dyn_df_data_history = DynamicFrame.fromDF(
-    #     df_data_history, glueContext, "nested")
-
-    # # write to history table
-    # print("begin to write history table")
-    # append_options = redshift.conn_option(history_tb_name)
-    # glueContext.write_dynamic_frame.from_options(
-    #     frame=dyn_df_data_history,
-    #     connection_type="redshift",
-    #     connection_options=append_options
-    # )
-
-    # # write to current table
-    # print("begin to write stable table")
-    # dyn_df_data = DynamicFrame.fromDF(df_data, glueContext, "nested")
-    # overwrite_options = redshift.conn_option(target_tb, "overwrite")
-
-    # glueContext.write_dynamic_frame.from_options(
-    #     frame=dyn_df_data,
-    #     connection_type="redshift",
-    #     connection_options=overwrite_options
-    # )
-    pass
 
 
 def main():
@@ -208,7 +180,7 @@ def main():
     history_tb_name = target_tb + "_history"
 
     # 写入数据
-    # write_data(redshift, target_tb, history_tb_name, df_data, version)
+    write_data(redshift, target_tb, history_tb_name, df_data, version)
 
     # # 如果是第一次写入数据后，则需要添加注释信息
     # if not schema:
@@ -219,3 +191,7 @@ def main():
 
 
 main()
+
+
+def write_data(redshift: Redshift, target_tb: str, history_tb_name: str, df_data: DataFrame, data_version: str):
+    pass

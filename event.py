@@ -16,14 +16,12 @@ sqs_url = "https://sqs.cn-northwest-1.amazonaws.com.cn/027040934161/sam-data-pla
 
 def lambda_handler(event, context):
     print("Received event: " + json.dumps(event, indent=2))
-    s3 = boto3.client('s3', region_name=region_name)
-    glue = boto3.client('glue', region_name=region_name)
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     keys = [record['s3']['bucket']['name'] + "/" + record['s3']['object']['key']
             for record in event['Records']]
-
+    print(keys)
     try:
         dynamodb = boto3.client('dynamodb', region_name=region_name)
         sqs = boto3.client('sqs', region_name=region_name)
@@ -60,11 +58,13 @@ def lambda_handler(event, context):
             )
 
         parallel_count = min(max_parallel_count, len(keys))
-        for i in range(0, parallel_count):
-            glue.start_workflow_run(
-                Name=workflow_name,
-            )
-            time.sleep(1)
+
+        glue = boto3.client('glue', region_name=region_name)
+        # for i in range(0, parallel_count):
+        #     glue.start_workflow_run(
+        #         Name=workflow_name,
+        #     )
+        #     time.sleep(0.5)
         return {
             "status": "ok"
         }
