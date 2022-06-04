@@ -6,3 +6,4 @@
 /spark-warehouse
 /test.py
 /test.sh
+__pycache__/*
