@@ -1,6 +1,5 @@
 import sys
 import time
-from awsglue.transforms import *
 from awsglue.dynamicframe import DynamicFrame
 from awsglue.utils import getResolvedOptions
 from awsglue.context import GlueContext
@@ -14,6 +13,7 @@ from redshift import Redshift
 from column_helper import ColumnDataTypeCheck, ColumnFormater
 import boto3
 import json
+import re
 
 
 region_name = "cn-northwest-1"
@@ -108,16 +108,17 @@ def update_column_dtype(redshift_schema: dict, df_data: DataFrame):
     return df_data
 
 
+reg_ex = re.compile('[^A-Za-z0-9]')
+
+
 def get_tb_name(s3_path: str):
     last_index = s3_path.rfind("/")
     file_name = s3_path[last_index + 1:]
-    parts = file_name.split("_")
-    uparts = parts[0: len(parts) - 1]
-    tb_name = "_".join(uparts).lower()
-    tb_name = tb_name.replace(' ', '_')
-    version_cvs = parts[len(parts) - 1]
-    # len(".csv") == 4
-    version = version_cvs[0:len(version_cvs) - 4]
+    parts = reg_ex.split(file_name)
+    used_parts = [item for item in parts if item.strip() != '']
+    ll = len(used_parts)
+    version = used_parts[ll-2]
+    tb_name = "_".join(used_parts[:ll-2]).lower()
     return tb_name, version
 
 
@@ -153,7 +154,7 @@ def get_tasks():
             #  "status": "begin"
 
             # 修改状态为正在开始处理
-            dp = dynamodb.update_item(
+            dynamodb.update_item(
                 TableName=dynamodb_sam_data_trace_tb,
                 Key={
                     'file_key': {'S': body['file_key']},
@@ -168,11 +169,8 @@ def get_tasks():
                     }
                 }
             )
-            print(dp)
 
             task_status = yield body
-
-            status = 'failed' if task_status else 'successful'
             # 修改状态为正在完成或失败
             dynamodb.update_item(
                 TableName=dynamodb_sam_data_trace_tb,
@@ -184,11 +182,12 @@ def get_tasks():
                 AttributeUpdates={
                     'status': {
                         'Value':  {
-                            "S": status
+                            "S": task_status
                         }
                     }
                 }
             )
+    yield None
 
 
 def get_data(spark: SparkSession, s3_path: str) -> DataFrame:
@@ -296,14 +295,17 @@ def do_task(file_s3_path: str):
 
 def main():
     gen = get_tasks()
-    for task in gen:
+    task = next(gen)
+    while task:
         file_path = task['file_key']
         print(f"=========> got task {file_path}")
         try:
             do_task(file_path)
+            task = gen.send("successful")
         except Exception as e:
             print(f"ERROR ===========> {e}")
-            gen.send(False)
+            task = gen.send("failed")
+        time.sleep(1)
 
     job.commit()
 

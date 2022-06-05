@@ -163,11 +163,11 @@ class Redshift:
             ClusterIdentifier=self.redshift_identifier,
             ConnectedDatabase=self.redshift_db,
             Database=self.redshift_db,
-            MaxResults=123,
+            MaxResults=1000,
             SecretArn=self.secret_arn
 
         )
-        print(response)
+        return response
 
     def conn_option(self, tb_name: str, write_mode='append'):
         conn = {

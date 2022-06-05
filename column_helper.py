@@ -135,6 +135,8 @@ class ColumnDataTypeCheck:
 
 
 class ColumnFormater:
+    def __init__(self):
+        self._reg_ex = re.compile('[^A-Za-z0-9]')
 
     def run(self, df: DataFrame) -> DataFrame:
         df = self.format_column_name(df)
@@ -144,30 +146,29 @@ class ColumnFormater:
     def remove_unused_columns(self, df: DataFrame) -> DataFrame:
         df = df.drop("English")
 
-        for column in df.columns:
-            if len(column.strip()) == 0:
-                df = df.drop(column)
-                continue
-            if column.startswith('_c') and column[2:].isnumeric():
-                df = df.drop(column)
-                continue
+        removed = [column for column in df.columns if len(column.strip()) == 0 or (
+            column.startswith('_c') and column[2:].isnumeric())]
+        df = df.drop(*removed)
         return df
 
     def update_duplicate_columns(self, df: DataFrame) -> DataFrame:
         duplicate_columns = dict()
         # 查找重复列
         column_names = df.columns
+        print(column_names)
         column_l = len(column_names)
-        for index in range(1, column_l):
+        for index in range(0, column_l):
             column_name = column_names[index]
-            if column_name.endswith(str(index)):
-                end_pos = len(column_name) - len(str(index))
+            column_index = index + 1
+            if column_name.endswith(str(column_index)):
+                end_pos = len(column_name) - len(str(column_index))
                 key = column_name[0: end_pos]
                 if key in duplicate_columns:
                     duplicate_columns[key].append(column_name)
                 else:
                     duplicate_columns[key] = [column_name]
-
+        print("**************")
+        print(duplicate_columns)
         # 对于重复列，值不为空的最多的那一列作为主列，其余为附属列
         for key in duplicate_columns:
             compare_columns = duplicate_columns[key]
@@ -193,16 +194,18 @@ class ColumnFormater:
         return df
 
     def format_column_name(self, df: DataFrame) -> DataFrame:
-        reg = "[^0-9A-Za-z_]"
         column_names = df.columns
 
+        check_names = {column_names[i].lower(
+        ): i for i in range(0, len(column_names))}
+        format_names = dict()
+
+        index = 0
         for column_name in column_names:
-            new_name = column_name
-            new_name = new_name.strip()
-            new_name = new_name.replace(' ', '_')
-            new_name = new_name.replace('-', '_')
-            new_name = new_name.replace('__', '_')
-            new_name = re.sub(reg, '', new_name)
+
+            parts = self._reg_ex.split(column_name)
+            good_parts = [item for item in parts if item.strip() != '']
+            new_name = '_'.join(good_parts)
 
             # 首字符不能数字
             first_char = new_name[0]
@@ -212,6 +215,15 @@ class ColumnFormater:
             # 全小写
             new_name = new_name.lower()
             if column_name != new_name:
-                df = df.withColumnRenamed(column_name, new_name)
+                # 如果有其他列的名字和修正后的列名称相同，则要修改名称
+                if new_name in check_names and check_names[new_name] != index:
+                    new_name = new_name + str(index + 1)
+                format_names[new_name] = column_name
+
+            index += 1
+
+        for key in format_names:
+            column_name = format_names[key]
+            df = df.withColumnRenamed(column_name, key)
 
         return df
