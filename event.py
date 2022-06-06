@@ -2,10 +2,11 @@ import json
 import time
 import urllib.parse
 import boto3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 region_name = "cn-northwest-1"
-max_parallel_count = 10
+max_parallel_count = 5
+time_diff = 10  # 十分钟内不容许上传相同的文档
 
 # ===========================需要修改或确认的配置参数================================
 dynamodb_sam_data_trace_tb = 'sam-data-upload-event'
@@ -14,20 +15,55 @@ sqs_url = "https://sqs.cn-northwest-1.amazonaws.com.cn/027040934161/sam-data-pla
 # ===========================需要修改或确认的配置参数================================
 
 
+def check_key(dynamodb, file_key):
+    compare = (datetime.now() - timedelta(minutes=time_diff)
+               ) .strftime("%Y-%m-%d %H:%M:%S")
+
+    response = dynamodb.query(
+        TableName=dynamodb_sam_data_trace_tb,
+        Limit=100,
+        Select='ALL_ATTRIBUTES',
+        KeyConditions={
+            'file_key': {
+                'AttributeValueList': [
+                    {
+                        'S': file_key,
+                    },
+                ],
+                'ComparisonOperator': 'EQ'
+            },
+            'event_time': {
+                'AttributeValueList': [
+                    {
+                        'S': compare
+                    },
+                ],
+                'ComparisonOperator': 'GT'
+            }
+        })
+    return len(response['Items'])
+
+
 def lambda_handler(event, context):
-    print("Received event: " + json.dumps(event, indent=2))
+    print("Received event: " + str(event))
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     keys = [record['s3']['bucket']['name'] + "/" + record['s3']['object']['key']
             for record in event['Records']]
-    print(keys)
+    task_count = 0
     try:
         dynamodb = boto3.client('dynamodb', region_name=region_name)
         sqs = boto3.client('sqs', region_name=region_name)
         for key in keys:
             ukey = urllib.parse.unquote_plus(key, encoding='utf-8')
             file_key = "s3://" + ukey
+            c = check_key(file_key)
+            # 已经存在了
+            if c > 0:
+                continue
+
+            task_count += 1
             dynamodb.update_item(
                 TableName=dynamodb_sam_data_trace_tb,
                 Key={
@@ -57,18 +93,20 @@ def lambda_handler(event, context):
                 DelaySeconds=0
             )
 
-        parallel_count = min(max_parallel_count, len(keys))
+        parallel_count = min(max_parallel_count, task_count)
 
         glue = boto3.client('glue', region_name=region_name)
-        # for i in range(0, parallel_count):
-        #     glue.start_workflow_run(
-        #         Name=workflow_name,
-        #     )
-        #     time.sleep(0.5)
-        return {
-            "status": "ok"
-        }
+        for i in range(0, parallel_count):
+            p = glue.start_workflow_run(
+                Name=workflow_name,
+            )
+            print(f"got glue workflow {p}")
     except Exception as e:
         print(e)
-        print('Error getting object {} from bucket {}. Make sure they exist and your bucket is in the same region as this function.'.format(key, bucket))
-        raise e
+        return {
+            "status": str(e)
+        }
+
+    return {
+        "status": "ok"
+    }

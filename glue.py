@@ -131,7 +131,7 @@ def get_tasks():
     while True:
         response = sqs.receive_message(
             QueueUrl=sqs_url,
-            VisibilityTimeout=60
+            VisibilityTimeout=600
         )
         print(response)
         if "Messages" not in response:
@@ -140,6 +140,7 @@ def get_tasks():
 
         index += 1
         messages = response["Messages"]
+        task_info = list()
         for msg in messages:
             body_str = msg["Body"]
             body = json.loads(body_str)
@@ -148,7 +149,9 @@ def get_tasks():
                 QueueUrl=sqs_url,
                 ReceiptHandle=receipt_handle
             )
+            task_info.append(body)
 
+        for body in task_info:
             #  "file_key": file_key,
             #  "event_time": current_time,
             #  "status": "begin"
@@ -166,11 +169,19 @@ def get_tasks():
                         'Value':  {
                             "S": "processing"
                         }
+                    },
+                    'msg': {
+                        'Value':  {
+                            "S": "etl"
+                        }
                     }
                 }
             )
 
-            task_status = yield body
+            info = yield body
+            parts = info.split("==>")
+            task_status = parts[0]
+            msg = parts[1]
             # 修改状态为正在完成或失败
             dynamodb.update_item(
                 TableName=dynamodb_sam_data_trace_tb,
@@ -183,6 +194,11 @@ def get_tasks():
                     'status': {
                         'Value':  {
                             "S": task_status
+                        }
+                    },
+                    'msg': {
+                        'Value':  {
+                            "S": msg
                         }
                     }
                 }
@@ -301,10 +317,10 @@ def main():
         print(f"=========> got task {file_path}")
         try:
             do_task(file_path)
-            task = gen.send("successful")
+            task = gen.send("successful==>successful")
         except Exception as e:
             print(f"ERROR ===========> {e}")
-            task = gen.send("failed")
+            task = gen.send(f"failed==>{e}")
         time.sleep(1)
 
     job.commit()
