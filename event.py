@@ -15,9 +15,7 @@ sqs_url = "https://sqs.cn-northwest-1.amazonaws.com.cn/027040934161/sam-data-pla
 # ===========================需要修改或确认的配置参数================================
 
 
-def check_key(dynamodb, file_key):
-    compare = (datetime.now() - timedelta(minutes=time_diff)
-               ) .strftime("%Y-%m-%d %H:%M:%S")
+def check_key(dynamodb, file_key, cond):
 
     response = dynamodb.query(
         TableName=dynamodb_sam_data_trace_tb,
@@ -35,7 +33,7 @@ def check_key(dynamodb, file_key):
             'event_time': {
                 'AttributeValueList': [
                     {
-                        'S': compare
+                        'S': cond
                     },
                 ],
                 'ComparisonOperator': 'GT'
@@ -46,8 +44,10 @@ def check_key(dynamodb, file_key):
 
 def lambda_handler(event, context):
     print("Received event: " + str(event))
-
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now()
+    current_time = now.strftime("%Y-%m-%d %H:%M:%S")
+    condition = (now - timedelta(minutes=time_diff)
+                 ).strftime("%Y-%m-%d %H:%M:%S")
 
     keys = [record['s3']['bucket']['name'] + "/" + record['s3']['object']['key']
             for record in event['Records']]
@@ -58,7 +58,7 @@ def lambda_handler(event, context):
         for key in keys:
             ukey = urllib.parse.unquote_plus(key, encoding='utf-8')
             file_key = "s3://" + ukey
-            c = check_key(file_key)
+            c = check_key(dynamodb, file_key, condition)
             # 已经存在了
             if c > 0:
                 continue
