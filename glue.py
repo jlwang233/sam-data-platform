@@ -112,14 +112,19 @@ reg_ex = re.compile('[^A-Za-z0-9]')
 
 
 def get_tb_name(s3_path: str):
-    last_index = s3_path.rfind("/")
-    file_name = s3_path[last_index + 1:]
+    path_parts = s3_path.split("/")
+    count = len(path_parts)
+
+    file_name = path_parts[count-1]
+
     parts = reg_ex.split(file_name)
     used_parts = [item for item in parts if item.strip() != '']
     ll = len(used_parts)
     version = used_parts[ll-2]
     tb_name = "_".join(used_parts[:ll-2]).lower()
-    return tb_name, version
+
+    file_date = path_parts[count-2]
+    return tb_name, file_date, version
 
 
 def get_tasks():
@@ -220,12 +225,14 @@ def get_data(spark: SparkSession, s3_path: str) -> DataFrame:
     return df_raw
 
 
-def write_data(redshift: Redshift, target_tb: str, history_tb_name: str, df_data: DataFrame, data_version: str):
+def write_data(redshift: Redshift, target_tb: str, history_tb_name: str, df_data: DataFrame, data_date: str, data_version: str):
     current_date = datetime.now().strftime("%Y-%m-%d")
     # 保存所有历史的数据，历史表添加一个数据etl 日期
     df_data_history = df_data.withColumn("etl_date", F.lit(current_date))
     df_data_history = df_data_history.withColumn(
         "etl_version",  F.lit(data_version))
+    df_data_history = df_data_history.withColumn(
+        "file_upload_date", F.lit(data_date))
 
     dyn_df_data_history = DynamicFrame.fromDF(
         df_data_history, glueContext, "nested")
@@ -253,7 +260,7 @@ def write_data(redshift: Redshift, target_tb: str, history_tb_name: str, df_data
 
 def do_task(file_s3_path: str):
     # 表明从dynamodb 去获取
-    target_tb, version = get_tb_name(file_s3_path)
+    target_tb, tb_date, version = get_tb_name(file_s3_path)
 
     df_raw = get_data(spark, file_s3_path)
     df_raw.printSchema()
@@ -299,7 +306,7 @@ def do_task(file_s3_path: str):
     history_tb_name = target_tb + "_history"
 
     # 写入数据
-    write_data(redshift, target_tb, history_tb_name, df_data, version)
+    write_data(redshift, target_tb, history_tb_name, df_data, tb_date, version)
 
     # 如果是第一次写入数据后，则需要添加注释信息
     if not schema:
