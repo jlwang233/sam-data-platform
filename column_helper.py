@@ -1,16 +1,23 @@
+from tokenize import Special
 from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql import functions as F
+from pyspark.sql.types import StringType, ArrayType, StructType, StructField, IntegerType, DoubleType, LongType
 from datetime import datetime, date
 import re
+
+Special_Columns = {'requesting_opp_arr': 'REAL'}
 
 
 class ColumnDataTypeCheck:
     def __init__(self):
         self.sample_ratio = 0.1
-        self.max_check_count = 5
+        self.max_check_count = 20
+        self.min_check_count = 10
         self.bool_char = ['y', 'n', "true", "false"]
         self.datetime1_format = "%Y-%m-%d %H:%M:%S"
         self.datetime2_format = "%Y-%m-%d %H:%M"
         self.date_format = "%Y-%m-%d"
+        self.date2_format = "%Y/%m/%d"
         self.string_length = 1024
 
     def run(self, df: DataFrame, check_columns: list = None) -> dict:
@@ -18,6 +25,9 @@ class ColumnDataTypeCheck:
         column_names = check_columns if check_columns else df.columns
 
         for column_name in column_names:
+            if column_name in Special_Columns:
+                result[column_name] = Special_Columns[column_name]
+                break
 
             dfu = df.select(column_name)
 
@@ -30,9 +40,14 @@ class ColumnDataTypeCheck:
                 rows = dfsample.collect()
 
             count = len(rows)
-            check_count = min(count, self.max_check_count)
+            if count < self.min_check_count:
+                rows = dfu.collect()
 
-            intCount = 0
+            count = len(rows)
+            check_count = max(count, self.min_check_count)
+            check_count = min(check_count, self.max_check_count)
+
+            longCount = 0
             floatCount = 0
             boolCount = 0
             datetimeCount = 0
@@ -47,12 +62,12 @@ class ColumnDataTypeCheck:
                 loop_index += 1
 
                 for v in row:
-                    if self.is_int(v):
-                        intCount += 1
-                        continue
-
                     if self.is_float(v):
                         floatCount += 1
+                        continue
+
+                    if self.is_long(v):
+                        longCount += 1
                         continue
 
                     if self.is_bool(v):
@@ -67,12 +82,17 @@ class ColumnDataTypeCheck:
                         dateCount += 1
                         continue
 
+                if floatCount > 0 and floatCount + longCount == check_count:
+                    floatCount = floatCount + longCount
+                    longCount = 0
+
             result[column_name] = f'VARCHAR({self.string_length})'
-            for item in [(intCount, "BIGINT"), (floatCount, "REAL"), (boolCount, "BOOLEAN"), (datetimeCount, "TIMESTAMP"), (dateCount, "DATE")]:
+
+            for item in [(longCount, "BIGINT"), (floatCount, "REAL"), (boolCount, "BOOLEAN"), (datetimeCount, "TIMESTAMP"), (dateCount, "DATE")]:
                 if item[0] == check_count:
                     result[column_name] = item[1]
                     break
-
+        print(result)
         return result
 
     def to_spark_dtype(dtype: str) -> str:
@@ -94,13 +114,17 @@ class ColumnDataTypeCheck:
 
     def is_float(self, item: str) -> bool:
         try:
-            float(item)
-            return True
+            if item.find(".") > 0:
+                item = item.replace(',', '')
+                float(item)
+                return True
+            return False
         except:
             return False
 
-    def is_int(self, item: str) -> bool:
+    def is_long(self, item: str) -> bool:
         try:
+            item = item.replace(',', '')
             int(item)
             return True
         except:
@@ -131,7 +155,41 @@ class ColumnDataTypeCheck:
         except ValueError:
             res = False
 
+        if not res:
+            try:
+                res = bool(datetime.strptime(item, self.date2_format))
+            except ValueError:
+                res = False
+
         return res
+
+    @staticmethod
+    @F.udf(returnType=LongType())
+    def str_to_long(numStr):
+        if numStr:
+            if len(numStr) > 3:
+                numStr = numStr.replace(',', '')
+            try:
+                u = int(numStr)
+                return u
+            except Exception as ex:
+                print(f"failed to convert string to int due to {ex}")
+                return None
+        return None
+
+    @staticmethod
+    @F.udf(returnType=DoubleType())
+    def str_to_double(numStr):
+        if numStr:
+            if len(numStr) > 3:
+                numStr = numStr.replace(',', '')
+
+            try:
+                return float(numStr)
+            except Exception as ex:
+                print(f"failed to convert string to int due to {ex}")
+                return None
+        return None
 
 
 class ColumnFormater:
@@ -167,8 +225,7 @@ class ColumnFormater:
                     duplicate_columns[key].append(column_name)
                 else:
                     duplicate_columns[key] = [column_name]
-        print("**************")
-        print(duplicate_columns)
+
         # 对于重复列，值不为空的最多的那一列作为主列，其余为附属列
         for key in duplicate_columns:
             compare_columns = duplicate_columns[key]

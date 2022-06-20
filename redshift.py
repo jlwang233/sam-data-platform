@@ -29,7 +29,6 @@ class Redshift:
             Sql=sql,
             WithEvent=False
         )
-        print(response)
         if "Id" not in response:
             return
 
