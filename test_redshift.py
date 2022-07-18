@@ -30,5 +30,5 @@ for table in tables:
     tb_name = table['name']
     if not tb_name.startswith("xiaoshouyi"):
         continue
-    redshift.exec(f'drop table public."{tb_name}";')
+    # redshift.exec(f'drop table public."{tb_name}";')
     print(f'drop table public."{tb_name}";')

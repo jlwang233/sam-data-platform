@@ -20,3 +20,10 @@ Pyspark: ValueError: Some Of Types Cannot Be Determined After Inferring
 
 原因，列全为空
 ```
+
+# 需要的资源
+1. redshift 集群
+2. redshift-data  interface endpoint
+3. sqs
+4. sqs interface endpoint
+5. dynomaDB

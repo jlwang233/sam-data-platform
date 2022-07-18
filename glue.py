@@ -17,14 +17,14 @@ import json
 region_name = "cn-northwest-1"
 
 # ===========================需要修改的配置参数================================
-redshift_secret_name = 'dev/demo/redshift'
-secret_arn = 'arn:aws-cn:secretsmanager:cn-northwest-1:027040934161:secret:dev/demo/redshift-dpZ9yS'
+redshift_secret_name = 'dev/sam/redshift'
+secret_arn = 'arn:aws-cn:secretsmanager:cn-northwest-1:079001511566:secret:dev/sam/redshift-tctyOg'
 redshift_db = 'dev'
-redshift_temp_s3 = 's3://sam-data-platform-redshift-temp'
-redshift_endpoint = "https://vpce-0c20d267bb10f74e6-zlv5xrlp.redshift-data.cn-northwest-1.vpce.amazonaws.com.cn"
-dynamodb_sam_data_trace_tb = 'sam-data-upload-event'
-sqs_url = "https://sqs.cn-northwest-1.amazonaws.com.cn/027040934161/sam-data-plaftform-test"
-sqs_endpoint_url = "https://vpce-05ddb236d804f224d-s18hyk87.sqs.cn-northwest-1.vpce.amazonaws.com.cn"
+redshift_temp_s3 = 's3://xy-sam-data-platform-redshift-temp'
+redshift_endpoint = "https://vpce-09e7e080970b5aafc-vx81ozci.redshift-data.cn-northwest-1.vpce.amazonaws.com.cn"
+dynamodb_sam_data_trace_tb = 'xy-sam-data-upload-event'
+sqs_url = "https://sqs.cn-northwest-1.amazonaws.com.cn/079001511566/xy-sam-data-sqs"
+sqs_endpoint_url = "https://vpce-00d7a33aec3f90717-5lz7g217.sqs.cn-northwest-1.vpce.amazonaws.com.cn"
 # =============================上面参数需要修改==========================================
 
 args = getResolvedOptions(sys.argv, ['JOB_NAME'])

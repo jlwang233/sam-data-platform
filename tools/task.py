@@ -17,7 +17,7 @@ def get_task():
     while True:
         response = sqs.receive_message(
             QueueUrl=sqs_url,
-            VisibilityTimeout=300
+            VisibilityTimeout=1
         )
         if "Messages" not in response:
             print(f"===> got {index}")
@@ -29,13 +29,12 @@ def get_task():
             body_str = msg["Body"]
             body = json.loads(body_str)
             receipt_handle = msg["ReceiptHandle"]
-            yield body
             sqs.delete_message(
                 QueueUrl=sqs_url,
                 ReceiptHandle=receipt_handle
             )
+            yield body
 
 
 for task in get_task():
     print(task)
-    time.sleep(1)
